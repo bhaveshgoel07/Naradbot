@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "personal-agent"
+version = "0.1.0"
+description = "LangGraph-powered personal agent with Discord and Hacker News workflows."
+requires-python = ">=3.11"
+dependencies = [
+  "aiohttp>=3.11.18",
+  "apscheduler>=3.11.0",
+  "discord.py>=2.5.2",
+  "fastapi>=0.115.12",
+  "langgraph>=0.3.25",
+  "openai>=1.75.0",
+  "pydantic-settings>=2.8.1",
+  "uvicorn>=0.34.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.5",
+  "pytest-asyncio>=0.25.3"
+]
+
+[project.scripts]
+personal-agent-api = "personal_agent.app:run"
+personal-agent-hn-once = "personal_agent.jobs.hn_digest:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
