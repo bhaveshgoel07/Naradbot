@@ -1,0 +1,25 @@
+type = "job"
+name = "personal-agent-hn-digest"
+
+[entrypoint]
+prod = "python -m personal_agent.jobs.hn_digest"
+dev = "uv run personal-agent-hn-once"
+
+[env]
+PERSONAL_AGENT_ENVIRONMENT = "production"
+PERSONAL_AGENT_LOG_LEVEL = "INFO"
+PERSONAL_AGENT_HN_FETCH_LIMIT = "60"
+PERSONAL_AGENT_SUMMARY_TOPIC_COUNT = "5"
+PERSONAL_AGENT_INTERESTING_TOP_N = "12"
+
+[runtime]
+generation = "mk3"
+memory = 1024
+timeout = 900
+
+[[triggers]]
+id = "every-six-hours"
+type = "cron"
+
+[triggers.configuration]
+cron = "0 */6 * * *"
