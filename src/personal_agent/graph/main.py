@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from langgraph.graph import END, StateGraph
 
 from personal_agent.graph.nodes.hn import HNWorkflowNodes
@@ -34,6 +36,22 @@ class HNWorkflow:
         graph.add_edge("publish_digests", "persist_results")
         graph.add_edge("persist_results", END)
         return graph
+
+    def get_graph(self) -> Any:
+        return self.graph.get_graph()
+
+    def draw_ascii(self) -> str:
+        return self.get_graph().draw_ascii()
+
+    def draw_mermaid(self) -> str:
+        return self.get_graph().draw_mermaid()
+
+    def draw_png(self) -> bytes:
+        graph = self.get_graph()
+        png_bytes = graph.draw_png()
+        if png_bytes is not None:
+            return png_bytes
+        return graph.draw_mermaid_png()
 
     async def run(self, request: HNWorkflowRequest) -> HNWorkflowState:
         initial_state = HNWorkflowState(request=request)

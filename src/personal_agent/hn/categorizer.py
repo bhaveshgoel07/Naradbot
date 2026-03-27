@@ -12,14 +12,18 @@ class StoryCategorizer:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
-    def build_channel_buckets(self, ranked_stories: list[RankedStory]) -> dict[str, list[RankedStory]]:
+    def build_channel_buckets(
+        self, ranked_stories: list[RankedStory]
+    ) -> dict[str, list[RankedStory]]:
         used_story_ids: set[int] = set()
 
         opportunities = self._all_opportunities(ranked_stories)
         used_story_ids.update(story.story.id for story in opportunities)
 
         interesting = self._take_unique(
-            sorted(ranked_stories, key=lambda item: item.interesting_score, reverse=True),
+            sorted(
+                ranked_stories, key=lambda item: item.interesting_score, reverse=True
+            ),
             limit=self.settings.interesting_top_n,
             used_story_ids=used_story_ids,
             predicate=lambda story: story.interesting_score >= 3.0,
@@ -38,13 +42,17 @@ class StoryCategorizer:
             "opportunities": opportunities,
         }
 
-    @staticmethod
-    def _all_opportunities(ranked_stories: list[RankedStory]) -> list[RankedStory]:
-        return [
+    def _all_opportunities(
+        self, ranked_stories: list[RankedStory]
+    ) -> list[RankedStory]:
+        recent_opportunities = [
             story
-            for story in sorted(ranked_stories, key=lambda item: item.story.created_at, reverse=True)
+            for story in sorted(
+                ranked_stories, key=lambda item: item.story.created_at, reverse=True
+            )
             if story.is_opportunity
         ]
+        return recent_opportunities[: self.settings.opportunities_top_n]
 
     @staticmethod
     def _take_unique(
@@ -68,8 +76,12 @@ class StoryCategorizer:
     def build_empty_digests(self) -> list[ChannelDigest]:
         return [
             ChannelDigest(channel_key="summary", title="Hacker News Rollup"),
-            ChannelDigest(channel_key="interesting", title="Worth Reading from Hacker News"),
-            ChannelDigest(channel_key="opportunities", title="Hacker News Opportunities"),
+            ChannelDigest(
+                channel_key="interesting", title="Worth Reading from Hacker News"
+            ),
+            ChannelDigest(
+                channel_key="opportunities", title="Hacker News Opportunities"
+            ),
         ]
 
     @staticmethod
@@ -77,5 +89,7 @@ class StoryCategorizer:
         membership: dict[int, list[str]] = {}
         for digest in digests:
             for entry in digest.entries:
-                membership.setdefault(entry.ranked_story.story.id, []).append(digest.channel_key)
+                membership.setdefault(entry.ranked_story.story.id, []).append(
+                    digest.channel_key
+                )
         return membership

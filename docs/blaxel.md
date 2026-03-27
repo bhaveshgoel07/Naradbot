@@ -27,16 +27,26 @@
 - `PERSONAL_AGENT_HN_FETCH_LIMIT=60`
 - `PERSONAL_AGENT_INTERESTING_TOP_N=12`
 - `PERSONAL_AGENT_SUMMARY_TOPIC_COUNT=5`
+- `PERSONAL_AGENT_OPPORTUNITY_EMBEDDING_ENABLED=true`
+- `PERSONAL_AGENT_STORY_ANALYSIS_ENABLED=true`
 - `PERSONAL_AGENT_LLM_PROVIDER=nebius`
 - `PERSONAL_AGENT_LLM_API_KEY=...`
-- `PERSONAL_AGENT_LLM_MODEL=moonshotai/Kimi-K2.5-fast`
+- `PERSONAL_AGENT_LLM_MODEL=NousResearch/Hermes-4-70B`
+- `PERSONAL_AGENT_PI_GITHUB_TOKEN=...`
+- `PERSONAL_AGENT_PI_WORKSPACE_ROOT=/tmp/personal-agent/pi`
 
 ## Commands
 
 - Local API: `uv run personal-agent-api`
 - Local one-shot digest: `uv run personal-agent-hn-once`
 - Manual API trigger: `POST /workflows/hacker-news/run`
+- Sandboxed repo edit + PR: `POST /agents/pi/repos/run`
 - Example manifests: `deploy/blaxel/agent.blaxel.toml.example` and `deploy/blaxel/job.blaxel.toml.example`
+
+## Build note
+
+- The repo uses a `src/` layout, so Blaxel should run the packaged script entrypoints with `uv run ...` instead of `python -m personal_agent...`.
+- The checked-in manifests now use `uv run personal-agent-api` and `uv run personal-agent-hn-once` for production entrypoints to avoid the import-path failure that happens when `src/` is not on `PYTHONPATH`.
 
 ## Scheduling
 

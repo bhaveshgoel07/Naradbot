@@ -1,0 +1,28 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	fetch_story_sources(fetch_story_sources)
+	deduplicate_story_sources(deduplicate_story_sources)
+	fetch_story_details(fetch_story_details)
+	score_stories(score_stories)
+	categorize_stories(categorize_stories)
+	summarize_digests(summarize_digests)
+	publish_digests(publish_digests)
+	persist_results(persist_results)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> fetch_story_sources;
+	categorize_stories --> summarize_digests;
+	deduplicate_story_sources --> fetch_story_details;
+	fetch_story_details --> score_stories;
+	fetch_story_sources --> deduplicate_story_sources;
+	publish_digests --> persist_results;
+	score_stories --> categorize_stories;
+	summarize_digests --> publish_digests;
+	persist_results --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

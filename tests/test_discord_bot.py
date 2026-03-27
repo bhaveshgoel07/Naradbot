@@ -48,3 +48,31 @@ async def test_send_digest_message_sends_multiple_chunks_for_long_content() -> N
     assert len(fake_channel.sent_messages) > 1
     assert "".join(fake_channel.sent_messages) == message
     assert all(len(part) <= DISCORD_MESSAGE_CHAR_LIMIT for part in fake_channel.sent_messages)
+
+
+def test_format_pi_status_message_includes_sandbox_details() -> None:
+    message = PersonalAgentDiscordBot.format_pi_status_message(
+        {
+            "available": True,
+            "default_provider": "openai",
+            "default_model": "openai/gpt-5.4-mini",
+            "sandbox_mode": "isolated_repo_clone",
+            "repo_workflow_available": True,
+            "workspace_root": "/tmp/personal-agent/pi",
+        }
+    )
+
+    assert "openai / openai/gpt-5.4-mini" in message
+    assert "isolated_repo_clone" in message
+    assert "/tmp/personal-agent/pi" in message
+
+
+def test_format_pr_review_message_targets_command_center_review() -> None:
+    message = PersonalAgentDiscordBot.format_pr_review_message(
+        pr_url="https://github.com/example/repo/pull/1",
+        author_mention="@bhaves",
+    )
+
+    assert "@bhaves" in message
+    assert "review this pull request in command-center" in message
+    assert "https://github.com/example/repo/pull/1" in message

@@ -6,6 +6,8 @@ from typing import Any
 import discord
 from discord.ext import commands
 
+from personal_agent.automation.models import PiRepositoryTaskRequest
+from personal_agent.automation.pi_agent import PiCodingAgentService
 from personal_agent.config.settings import Settings
 from personal_agent.discord.messages import DISCORD_MESSAGE_CHAR_LIMIT, split_discord_message_content
 from personal_agent.hn.service import HNService
@@ -23,6 +25,7 @@ class PersonalAgentDiscordBot(commands.Bot):
         settings: Settings,
         hn_service: HNService,
         run_repository: HNRunRepository,
+        pi_coding_agent_service: PiCodingAgentService,
     ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
@@ -30,6 +33,7 @@ class PersonalAgentDiscordBot(commands.Bot):
         self.settings = settings
         self.hn_service = hn_service
         self.run_repository = run_repository
+        self.pi_coding_agent_service = pi_coding_agent_service
 
     async def setup_hook(self) -> None:
         @self.command(name="ping")
@@ -63,11 +67,89 @@ class PersonalAgentDiscordBot(commands.Bot):
                 )
             await ctx.send("\n".join(lines))
 
+        @self.command(name="pi-status")
+        async def pi_status(ctx: commands.Context[Any]) -> None:
+            await ctx.send(
+                self.format_pi_status_message(self.pi_coding_agent_service.status())
+            )
+
+        @self.command(name="code")
+        async def code(
+            ctx: commands.Context[Any],
+            repo_url: str,
+            *,
+            prompt: str,
+        ) -> None:
+            await ctx.typing()
+            result = await self.pi_coding_agent_service.run_repository_task(
+                PiRepositoryTaskRequest(
+                    repo_url=repo_url,
+                    prompt=prompt,
+                    requested_by=str(ctx.author),
+                )
+            )
+            await ctx.send(self.format_pi_repo_result_message(result))
+            if result.pr_url is not None:
+                await ctx.send(
+                    self.format_pr_review_message(
+                        pr_url=result.pr_url,
+                        author_mention=ctx.author.mention,
+                    )
+                )
+
         logger.info(
             "Discord commands registered with prefix=%r commands=%s",
             self.settings.discord_command_prefix,
             sorted(self.all_commands.keys()),
         )
+
+    @staticmethod
+    def format_pi_status_message(status: dict[str, object]) -> str:
+        return (
+            "Pi status:\n"
+            f"- available: {status.get('available')}\n"
+            f"- provider/model: {status.get('default_provider') or 'default'} / {status.get('default_model') or 'default'}\n"
+            f"- sandbox: {status.get('sandbox_mode')}\n"
+            f"- repo workflow: {status.get('repo_workflow_available')}\n"
+            f"- workspace root: {status.get('workspace_root')}"
+        )
+
+    @staticmethod
+    def format_pi_repo_result_message(result: object) -> str:
+        pr_url = getattr(result, "pr_url", None)
+        if pr_url:
+            return (
+                f"Pi finished in sandbox mode `{getattr(result, 'sandbox_mode', 'unknown')}` "
+                f"and opened a pull request: {pr_url}"
+            )
+        if getattr(result, "exit_code", 0) != 0:
+            details = PersonalAgentDiscordBot._trim_output(
+                getattr(result, "stderr", "") or getattr(result, "stdout", "")
+            )
+            return (
+                f"Pi failed with exit code {getattr(result, 'exit_code', 'unknown')}.\n"
+                f"{details or 'No error output was returned.'}"
+            )
+        if not getattr(result, "changes_detected", False):
+            return (
+                "Pi finished in the isolated repo sandbox but did not leave file changes."
+            )
+        return (
+            "Pi finished in the isolated repo sandbox and committed changes, "
+            "but no pull request URL was created.\n"
+            f"{PersonalAgentDiscordBot._trim_output(getattr(result, 'stderr', ''))}"
+        )
+
+    @staticmethod
+    def format_pr_review_message(*, pr_url: str, author_mention: str) -> str:
+        return f"{author_mention} review this pull request in command-center before merge: {pr_url}"
+
+    @staticmethod
+    def _trim_output(text: str, *, limit: int = 600) -> str:
+        cleaned = " ".join(text.split())
+        if len(cleaned) <= limit:
+            return cleaned
+        return cleaned[: limit - 3] + "..."
 
     async def send_digest_message(self, channel_key: str, message: str) -> None:
         channel_id = self.settings.channel_ids.get(channel_key)

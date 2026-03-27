@@ -12,10 +12,12 @@ dependencies = [
   "apscheduler>=3.11.0",
   "discord.py>=2.5.2",
   "fastapi>=0.115.12",
+  "langchain>=1.2.13",
+  "langchain-openai>=1.1.11",
   "langgraph>=0.3.25",
   "openai>=1.75.0",
   "pydantic-settings>=2.8.1",
-  "uvicorn>=0.34.0"
+  "uvicorn>=0.34.0",
 ]
 
 [project.optional-dependencies]
