@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterable
 
@@ -99,6 +100,12 @@ class StoryScorer:
         ranked, metadata = self._rank_stories_with_metadata(stories)
         return ranked, metadata
 
+    def prepare_shared_scores(
+        self, stories: Iterable[HNStory]
+    ) -> tuple[list[RankedStory], dict[str, object]]:
+        """Shared heuristic ranking used before graph branch fan-out."""
+        return self._rank_stories_with_metadata(stories)
+
     async def rank_stories_async(self, stories: Iterable[HNStory]) -> list[RankedStory]:
         """Async ranking with optional embedding and LLM enrichment."""
         ranked, _, _ = await self.rank_stories_async_with_metadata(stories)
@@ -108,21 +115,107 @@ class StoryScorer:
         self, stories: Iterable[HNStory]
     ) -> tuple[list[RankedStory], dict[str, object], dict[int, dict[str, object]]]:
         story_list = list(stories)
-        ranked, score_metadata = self._rank_stories_with_metadata(story_list)
-
-        ranked, embedding_matches = await self._apply_embedding_validation(
-            ranked, score_metadata
+        prepared_ranked, prepared_score_metadata = self.prepare_shared_scores(story_list)
+        editorial_task = self.enrich_editorial_scores(prepared_ranked)
+        opportunity_task = self.enrich_opportunity_scores(prepared_ranked)
+        (
+            (editorial_ranked, editorial_metadata),
+            (opportunity_ranked, opportunity_metadata, embedding_matches),
+        ) = await asyncio.gather(editorial_task, opportunity_task)
+        merged_ranked, merged_metadata = self.merge_branch_results(
+            prepared_ranked=prepared_ranked,
+            prepared_metadata=prepared_score_metadata,
+            editorial_ranked=editorial_ranked,
+            editorial_metadata=editorial_metadata,
+            opportunity_ranked=opportunity_ranked,
+            opportunity_metadata=opportunity_metadata,
         )
-        ranked = await self._apply_story_analysis(
+        return merged_ranked, merged_metadata, embedding_matches
+
+    async def enrich_editorial_scores(
+        self, ranked: list[RankedStory]
+    ) -> tuple[list[RankedStory], dict[str, object]]:
+        """Editorial branch for summary and interesting scoring."""
+        metadata: dict[str, object] = {}
+        editorial_ranked = await self._apply_story_analysis(
             ranked,
-            embedding_matches=embedding_matches,
-            score_metadata=score_metadata,
+            embedding_matches={},
+            score_metadata=metadata,
+            preserve_opportunity_scores=True,
         )
+        return editorial_ranked, metadata
 
+    async def enrich_opportunity_scores(
+        self, ranked: list[RankedStory]
+    ) -> tuple[list[RankedStory], dict[str, object], dict[int, dict[str, object]]]:
+        """Opportunity branch for embedding-backed job-post verification."""
+        metadata: dict[str, object] = {}
+        opportunity_ranked, embedding_matches = await self._apply_embedding_validation(
+            ranked,
+            metadata,
+        )
+        return opportunity_ranked, metadata, embedding_matches
+
+    def merge_branch_results(
+        self,
+        *,
+        prepared_ranked: list[RankedStory],
+        prepared_metadata: dict[str, object],
+        editorial_ranked: list[RankedStory],
+        editorial_metadata: dict[str, object],
+        opportunity_ranked: list[RankedStory],
+        opportunity_metadata: dict[str, object],
+    ) -> tuple[list[RankedStory], dict[str, object]]:
+        """Merge editorial and opportunity branches into one ranked view."""
+        prepared_by_id = {item.story.id: item for item in prepared_ranked}
+        editorial_by_id = {item.story.id: item for item in editorial_ranked}
+        opportunity_by_id = {item.story.id: item for item in opportunity_ranked}
+
+        merged_ranked: list[RankedStory] = []
+        for story_id, prepared_item in prepared_by_id.items():
+            editorial_item = editorial_by_id.get(story_id, prepared_item)
+            opportunity_item = opportunity_by_id.get(story_id, prepared_item)
+            opportunity_summary_delta = round(
+                opportunity_item.summary_score - prepared_item.summary_score,
+                2,
+            )
+            merged_summary_score = round(
+                editorial_item.summary_score + opportunity_summary_delta,
+                2,
+            )
+            merged_ranked.append(
+                RankedStory(
+                    story=prepared_item.story,
+                    interesting_score=editorial_item.interesting_score,
+                    opportunity_score=opportunity_item.opportunity_score,
+                    summary_score=merged_summary_score,
+                    generated_summary=editorial_item.generated_summary,
+                    generated_why_it_matters=editorial_item.generated_why_it_matters,
+                    analysis_source=editorial_item.analysis_source,
+                    verification_status=editorial_item.verification_status,
+                    verification_notes=editorial_item.verification_notes,
+                    opportunity_verified=opportunity_item.opportunity_verified,
+                    reason_tags=list(
+                        dict.fromkeys(
+                            editorial_item.reason_tags + opportunity_item.reason_tags
+                        )
+                    ),
+                    interesting_reason_tags=list(editorial_item.interesting_reason_tags),
+                    opportunity_reason_tags=list(opportunity_item.opportunity_reason_tags),
+                    summary_reason_tags=list(editorial_item.summary_reason_tags),
+                )
+            )
+
+        merged_metadata = self._merge_branch_metadata(
+            prepared_metadata=prepared_metadata,
+            editorial_metadata=editorial_metadata,
+            opportunity_metadata=opportunity_metadata,
+            editorial_story_count=len(editorial_by_id),
+            opportunity_story_count=len(opportunity_by_id),
+        )
         return (
-            sorted(ranked, key=lambda item: item.summary_score, reverse=True),
-            score_metadata,
-            embedding_matches,
+            sorted(merged_ranked, key=lambda item: item.summary_score, reverse=True),
+            merged_metadata,
         )
 
     async def _apply_embedding_validation(
@@ -236,6 +329,7 @@ class StoryScorer:
         *,
         embedding_matches: dict[int, dict[str, object]],
         score_metadata: dict[str, object],
+        preserve_opportunity_scores: bool = False,
     ) -> list[RankedStory]:
         if (
             not ranked
@@ -273,8 +367,16 @@ class StoryScorer:
                 verified_summary_count += 1
 
             llm_opportunity_score = analysis.opportunity_score
-            if self.opportunity_embedder is not None and not item.opportunity_verified:
-                llm_opportunity_score = 0.0
+            if preserve_opportunity_scores:
+                blended_opportunity_score = item.opportunity_score
+            else:
+                if self.opportunity_embedder is not None and not item.opportunity_verified:
+                    llm_opportunity_score = 0.0
+                blended_opportunity_score = self._blend_score(
+                    llm_opportunity_score,
+                    item.opportunity_score,
+                    llm_weight=0.85,
+                )
 
             analyzed_ranked.append(
                 RankedStory(
@@ -283,11 +385,7 @@ class StoryScorer:
                         analysis.interesting_score,
                         item.interesting_score,
                     ),
-                    opportunity_score=self._blend_score(
-                        llm_opportunity_score,
-                        item.opportunity_score,
-                        llm_weight=0.85,
-                    ),
+                    opportunity_score=blended_opportunity_score,
                     summary_score=self._blend_score(
                         analysis.summary_score,
                         item.summary_score,
@@ -309,6 +407,56 @@ class StoryScorer:
         score_metadata["analysis_story_count"] = len(analyses)
         score_metadata["analysis_verified_summary_count"] = verified_summary_count
         return analyzed_ranked
+
+    @staticmethod
+    def _merge_branch_metadata(
+        *,
+        prepared_metadata: dict[str, object],
+        editorial_metadata: dict[str, object],
+        opportunity_metadata: dict[str, object],
+        editorial_story_count: int,
+        opportunity_story_count: int,
+    ) -> dict[str, object]:
+        merged = dict(prepared_metadata)
+        merged["embedding_enabled"] = opportunity_metadata.get("embedding_enabled", False)
+        merged["embedding_match_count"] = opportunity_metadata.get(
+            "embedding_match_count", 0
+        )
+        if "embedding_error" in opportunity_metadata:
+            merged["embedding_error"] = opportunity_metadata["embedding_error"]
+        if "embedding_similarity_threshold" in opportunity_metadata:
+            merged["embedding_similarity_threshold"] = opportunity_metadata[
+                "embedding_similarity_threshold"
+            ]
+        if "embedding_margin_threshold" in opportunity_metadata:
+            merged["embedding_margin_threshold"] = opportunity_metadata[
+                "embedding_margin_threshold"
+            ]
+        if "embedding_query_count" in opportunity_metadata:
+            merged["embedding_query_count"] = opportunity_metadata[
+                "embedding_query_count"
+            ]
+        if "verified_opportunity_count" in opportunity_metadata:
+            merged["verified_opportunity_count"] = opportunity_metadata[
+                "verified_opportunity_count"
+            ]
+
+        merged["analysis_enabled"] = editorial_metadata.get("analysis_enabled", False)
+        merged["analysis_story_count"] = editorial_metadata.get("analysis_story_count", 0)
+        merged["analysis_verified_summary_count"] = editorial_metadata.get(
+            "analysis_verified_summary_count",
+            0,
+        )
+        if "analysis_error" in editorial_metadata:
+            merged["analysis_error"] = editorial_metadata["analysis_error"]
+
+        merged["parallel_branch_counts"] = {
+            "editorial": editorial_story_count,
+            "opportunities": opportunity_story_count,
+        }
+        merged["editorial_branch"] = editorial_metadata
+        merged["opportunities_branch"] = opportunity_metadata
+        return merged
 
     def _rank_stories_with_metadata(
         self, stories: Iterable[HNStory]

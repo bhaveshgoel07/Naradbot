@@ -1,0 +1,16 @@
+type = "sandbox"
+name = "personal-agent-computer-use-template"
+description = "Placeholder computer-use sandbox for future browser and desktop automation tasks."
+
+[runtime]
+generation = "mk3"
+memory = 4096
+
+[[runtime.ports]]
+name = "computer-use-preview"
+target = 3000
+protocol = "tcp"
+
+[env]
+PERSONAL_AGENT_SANDBOX_ROLE = "computer-use"
+PERSONAL_AGENT_COMPUTER_USE_ACTIONS = ""

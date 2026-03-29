@@ -118,8 +118,13 @@ def test_settings_expose_story_analysis_and_pi_defaults() -> None:
     assert settings.story_analysis_base_url_value == settings.llm_base_url
     assert settings.story_analysis_api_key_value is None
     assert settings.pi_command == "npx -y @mariozechner/pi-coding-agent"
-    assert settings.pi_provider == "openai"
-    assert settings.pi_model == "openai/gpt-5.4-mini"
+    assert settings.pi_provider_value == "nebius"
+    assert settings.pi_model_value == "moonshotai/Kimi-K2.5-fast"
+    assert (
+        settings.pi_base_url_value
+        == "https://api.tokenfactory.us-central1.nebius.com/v1/"
+    )
+    assert settings.pi_api_key_value is None
     assert settings.pi_default_tools == (
         "read",
         "bash",
@@ -131,6 +136,36 @@ def test_settings_expose_story_analysis_and_pi_defaults() -> None:
     )
     assert settings.pi_default_thinking == "low"
     assert settings.pi_workspace_root_path == Path("/tmp/personal-agent/pi")
+    assert settings.blaxel_region == "us-pdx-1"
+    assert settings.blaxel_orchestrator_sandbox_name == "personal-agent-pi-orchestrator"
+    assert (
+        settings.blaxel_orchestrator_sandbox_image
+        == "personal-agent-pi-orchestrator-template"
+    )
+    assert settings.blaxel_execution_sandbox_image == "personal-agent-pi-workspace-template"
+    assert settings.blaxel_repo_sandbox_image == "personal-agent-pi-workspace-template"
+    assert settings.blaxel_computer_use_sandbox_name == "personal-agent-computer-use"
+    assert settings.blaxel_computer_use_sandbox_image == "personal-agent-computer-use-template"
+
+
+def test_settings_support_blaxel_region_alias() -> None:
+    settings = SettingsForTest.model_validate(
+        {
+            "BL_REGION": "eu-lon-1",
+        }
+    )
+
+    assert settings.blaxel_region == "eu-lon-1"
+
+
+def test_settings_pi_api_key_falls_back_to_llm_api_key() -> None:
+    settings = SettingsForTest.model_validate(
+        {
+            "PERSONAL_AGENT_LLM_API_KEY": "test-nebius-key",
+        }
+    )
+
+    assert settings.pi_api_key_value == "test-nebius-key"
 
 
 def test_settings_story_analysis_api_key_falls_back_to_llm_api_key() -> None:

@@ -51,16 +51,55 @@ class HNWorkflowNodes:
         state.details["fetched_story_count"] = len(state.stories)
         return state
 
-    async def score_stories(self, state: HNWorkflowState) -> HNWorkflowState:
+    async def prepare_shared_scores(self, state: HNWorkflowState) -> HNWorkflowState:
         (
-            state.ranked_stories,
-            state.score_metadata,
-            state.opportunity_embedding_matches,
-        ) = await self.scorer.rank_stories_async_with_metadata(state.stories)
+            state.prepared_ranked_stories,
+            state.prepared_score_metadata,
+        ) = self.scorer.prepare_shared_scores(state.stories)
+        state.details["prepared_scoring"] = state.prepared_score_metadata
+        return state
+
+    async def run_editorial_arm(self, state: HNWorkflowState) -> dict[str, object]:
+        (
+            editorial_ranked_stories,
+            editorial_score_metadata,
+        ) = await self.scorer.enrich_editorial_scores(state.prepared_ranked_stories)
+        return {
+            "editorial_ranked_stories": editorial_ranked_stories,
+            "editorial_score_metadata": editorial_score_metadata,
+        }
+
+    async def run_opportunity_arm(self, state: HNWorkflowState) -> dict[str, object]:
+        (
+            opportunity_ranked_stories,
+            opportunity_score_metadata,
+            opportunity_embedding_matches,
+        ) = await self.scorer.enrich_opportunity_scores(state.prepared_ranked_stories)
+        return {
+            "opportunity_ranked_stories": opportunity_ranked_stories,
+            "opportunity_score_metadata": opportunity_score_metadata,
+            "opportunity_embedding_matches": opportunity_embedding_matches,
+        }
+
+    async def merge_story_scores(self, state: HNWorkflowState) -> HNWorkflowState:
+        state.ranked_stories, state.score_metadata = self.scorer.merge_branch_results(
+            prepared_ranked=state.prepared_ranked_stories,
+            prepared_metadata=state.prepared_score_metadata,
+            editorial_ranked=state.editorial_ranked_stories,
+            editorial_metadata=state.editorial_score_metadata,
+            opportunity_ranked=state.opportunity_ranked_stories,
+            opportunity_metadata=state.opportunity_score_metadata,
+        )
         state.details["scoring"] = state.score_metadata
+        state.details["editorial_scoring"] = state.editorial_score_metadata
+        state.details["opportunity_scoring"] = state.opportunity_score_metadata
         state.details["opportunity_embedding_match_count"] = len(
             state.opportunity_embedding_matches
         )
+        state.details["parallel_scoring_branches"] = [
+            "editorial",
+            "opportunities",
+        ]
         return state
 
     async def categorize_stories(self, state: HNWorkflowState) -> HNWorkflowState:

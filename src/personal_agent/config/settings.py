@@ -166,8 +166,9 @@ class Settings(BaseSettings):
         "find",
         "ls",
     )
-    pi_provider: str | None = "openai"
-    pi_model: str | None = "openai/gpt-5.4-mini"
+    pi_provider: str | None = "nebius"
+    pi_model: str | None = "moonshotai/Kimi-K2.5-fast"
+    pi_base_url: str | None = "https://api.tokenfactory.us-central1.nebius.com/v1/"
     pi_api_key: SecretStr | None = None
     pi_default_thinking: str | None = "low"
     pi_no_session: bool = True
@@ -183,6 +184,44 @@ class Settings(BaseSettings):
     )
     pi_git_author_name: str = "personal-agent"
     pi_git_author_email: str = "personal-agent@local.invalid"
+    blaxel_sandboxes_enabled: bool = True
+    blaxel_region: str = Field(
+        default="us-pdx-1",
+        validation_alias=AliasChoices("PERSONAL_AGENT_BLAXEL_REGION", "BL_REGION"),
+    )
+    blaxel_orchestrator_sandbox_name: str = "personal-agent-pi-orchestrator"
+    blaxel_orchestrator_sandbox_image: str = "personal-agent-pi-orchestrator-template"
+    blaxel_orchestrator_sandbox_memory: int = Field(default=4096, ge=512, le=32768)
+    blaxel_orchestrator_sandbox_ttl: str | None = None
+    blaxel_orchestrator_sandbox_idle_ttl: str | None = "30d"
+    blaxel_orchestrator_volume_name: str | None = None
+    blaxel_orchestrator_volume_mount_path: str | None = "/workspace"
+    blaxel_orchestrator_workspace_root: str = "/workspace"
+    blaxel_execution_sandbox_prefix: str = "personal-agent-exec"
+    blaxel_execution_sandbox_image: str = "personal-agent-pi-workspace-template"
+    blaxel_execution_sandbox_memory: int = Field(default=2048, ge=512, le=32768)
+    blaxel_execution_sandbox_ttl: str | None = "24h"
+    blaxel_execution_sandbox_idle_ttl: str | None = "24h"
+    blaxel_execution_volume_name: str | None = None
+    blaxel_execution_volume_mount_path: str | None = "/workspace"
+    blaxel_execution_workspace_root: str = "/workspace"
+    blaxel_repo_sandbox_prefix: str = "personal-agent-repo"
+    blaxel_repo_sandbox_image: str = "personal-agent-pi-workspace-template"
+    blaxel_repo_sandbox_memory: int = Field(default=4096, ge=512, le=32768)
+    blaxel_repo_sandbox_ttl: str | None = None
+    blaxel_repo_sandbox_idle_ttl: str | None = "14d"
+    blaxel_repo_volume_name: str | None = None
+    blaxel_repo_volume_mount_path: str | None = "/workspace"
+    blaxel_repo_workspace_root: str = "/workspace"
+    blaxel_computer_use_sandbox_name: str = "personal-agent-computer-use"
+    blaxel_computer_use_sandbox_image: str = "personal-agent-computer-use-template"
+    blaxel_computer_use_sandbox_memory: int = Field(default=4096, ge=512, le=32768)
+    blaxel_computer_use_sandbox_ttl: str | None = None
+    blaxel_computer_use_sandbox_idle_ttl: str | None = "7d"
+    blaxel_computer_use_volume_name: str | None = None
+    blaxel_computer_use_volume_mount_path: str | None = "/workspace"
+    blaxel_computer_use_workspace_root: str = "/workspace"
+    blaxel_computer_use_preview_port: int | None = Field(default=3000, ge=1, le=65535)
     candidate_full_name: str | None = None
     candidate_email: str | None = None
     candidate_phone: str | None = None
@@ -251,8 +290,22 @@ class Settings(BaseSettings):
         return self.llm_api_key_value
 
     @property
+    def pi_provider_value(self) -> str | None:
+        return self.pi_provider
+
+    @property
+    def pi_model_value(self) -> str | None:
+        return self.pi_model or self.llm_model
+
+    @property
+    def pi_base_url_value(self) -> str | None:
+        return self.pi_base_url or self.llm_base_url
+
+    @property
     def pi_api_key_value(self) -> str | None:
         if self.pi_api_key is None:
+            if self.pi_provider_value == "nebius":
+                return self.llm_api_key_value
             return None
         return self.pi_api_key.get_secret_value()
 

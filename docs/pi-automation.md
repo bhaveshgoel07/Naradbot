@@ -4,21 +4,34 @@
 
 The app now exposes two Pi paths:
 
-- `/agents/pi/run` for direct local workdir tasks.
-- `/agents/pi/repos/run` for the isolated repo workflow that clones a repository into `/tmp/personal-agent/pi`, lets Pi edit it, commits the result, and opens a GitHub pull request when a token is configured.
+- `/agents/pi/run` for direct prompt-driven coding tasks that run in a fresh Blaxel execution sandbox and are deleted afterward.
+- `/agents/pi/repos/run` for the per-repo persistent sandbox workflow. Each request gets its own Git worktree inside the repo sandbox, Pi edits there, and the result is committed in that sandbox-backed workspace.
+- `/agents/pi/repos/push` for the explicit approval step that pushes a prepared sandbox branch and opens a GitHub pull request.
+- `/automation/computer-use/status` and `/automation/computer-use/provision` for the currently empty computer-use sandbox contract.
 
 Default Pi runtime:
 
 - `PERSONAL_AGENT_PI_COMMAND="npx -y @mariozechner/pi-coding-agent"`
-- `PERSONAL_AGENT_PI_PROVIDER=openai`
-- `PERSONAL_AGENT_PI_MODEL=openai/gpt-5.4-mini`
-- `PERSONAL_AGENT_PI_API_KEY=...`
+- `PERSONAL_AGENT_PI_PROVIDER=nebius`
+- `PERSONAL_AGENT_PI_MODEL=moonshotai/Kimi-K2.5-fast`
+- `PERSONAL_AGENT_PI_BASE_URL=https://api.tokenfactory.us-central1.nebius.com/v1/`
+- `PERSONAL_AGENT_PI_API_KEY=...` or `PERSONAL_AGENT_LLM_API_KEY=...`
 - `PERSONAL_AGENT_PI_GITHUB_TOKEN=...`
 
 Quick check:
 
 ```bash
 curl http://localhost:8000/agents/pi/status
+```
+
+Blaxel-compatible inference endpoint:
+
+```bash
+curl -X POST http://localhost:8000/ \
+  -H "content-type: application/json" \
+  -d '{
+    "inputs": "Inspect the repository and summarize the current API surface."
+  }'
 ```
 
 Sandboxed repo run:
@@ -32,18 +45,34 @@ curl -X POST http://localhost:8000/agents/pi/repos/run \
   }'
 ```
 
+Approve push + open PR for a prepared workspace:
+
+```bash
+curl -X POST http://localhost:8000/agents/pi/repos/push \
+  -H "content-type: application/json" \
+  -d '{
+    "workspace_id": "personal-agent-repo-example__ws-20260328123456-fix-tests"
+  }'
+```
+
 Discord command-center usage:
 
 - Configure `PERSONAL_AGENT_DISCORD_COMMAND_CHANNEL_ID` to your command-center channel.
 - Use `!pi-status` to inspect the configured model and sandbox mode.
-- Use `!code <repo-url> <instruction>` to run the isolated clone/edit/PR workflow.
+- Use `!code <instruction>` for direct code writing/execution tasks.
+- Use `!repo <repo-url> <instruction>` to prepare repo changes in an isolated workspace (no push yet).
+- Use `!repo-push <workspace-id>` to approve push and open the PR.
 - When a PR is created, the bot posts a review request back into the same command-center channel.
 
 Important behavior:
 
 - The repo workflow does not attach local files to Pi.
-- Pi runs inside a temp cloned workspace with a scrubbed `HOME`, config, and cache directory.
-- This is not a Blaxel remote-execution sandbox today. It is an isolated temp workspace inside the deployed runtime.
+- Direct Pi runs create a short-lived execution sandbox after ensuring the persistent orchestrator sandbox exists.
+- Repo edits run inside a persistent per-repo sandbox and use unique worktrees as `workspace_id` values for later approval.
+- Pi runs inside sandbox-local `HOME`, config, cache, and temp directories instead of the API host filesystem.
+- Repo pushes are approval-gated by default (`allow_push=false` on `/agents/pi/repos/run`).
+- The root `POST /` endpoint accepts Blaxel-style `{"inputs": ...}` payloads and forwards them to Pi.
+- The computer-use sandbox is provisionable now, but it intentionally has no enabled actions yet.
 
 ## HN small-model analysis
 

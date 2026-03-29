@@ -16,6 +16,19 @@ class PiTaskRequest:
     thinking: str | None = None
     append_system_prompt: str | None = None
     timeout_seconds: int | None = None
+    session_id: str | None = None
+    structured_output: bool = False
+
+
+@dataclass(slots=True)
+class PiToolExecution:
+    """Single structured Pi tool execution emitted during a task."""
+
+    tool_name: str
+    tool_call_id: str | None = None
+    arguments: dict[str, object] = field(default_factory=dict)
+    output: str = ""
+    is_error: bool = False
 
 
 @dataclass(slots=True)
@@ -28,6 +41,12 @@ class PiTaskResult:
     stdout: str
     stderr: str
     duration_seconds: float
+    session_id: str | None = None
+    assistant_response: str = ""
+    tool_traces: list[PiToolExecution] = field(default_factory=list)
+    sandbox_mode: str | None = None
+    sandbox_name: str | None = None
+    sandbox_image: str | None = None
 
 
 @dataclass(slots=True)
@@ -47,6 +66,7 @@ class PiRepositoryTaskRequest:
     timeout_seconds: int | None = None
     tools: list[str] = field(default_factory=list)
     requested_by: str | None = None
+    allow_push: bool = False
 
 
 @dataclass(slots=True)
@@ -63,14 +83,52 @@ class PiRepositoryTaskResult:
     workspace_dir: str | None
     repo_dir: str | None
     repo_url: str
+    sandbox_name: str | None = None
+    sandbox_image: str | None = None
+    workspace_id: str | None = None
     base_branch: str | None = None
     branch_name: str | None = None
     commit_sha: str | None = None
     pr_url: str | None = None
     changes_detected: bool = False
     review_required: bool = False
+    push_pending: bool = False
     setup_commands: list[list[str]] = field(default_factory=list)
     git_status: str = ""
+
+
+@dataclass(slots=True)
+class PiRepositoryPushRequest:
+    """Approve and push an already prepared repository sandbox."""
+
+    workspace_id: str
+    pr_title: str | None = None
+    pr_body: str | None = None
+    base_branch: str | None = None
+    requested_by: str | None = None
+
+
+@dataclass(slots=True)
+class PiRepositoryPushResult:
+    """Result for a push/PR attempt from an existing sandbox."""
+
+    available: bool
+    command: list[str]
+    exit_code: int
+    stdout: str
+    stderr: str
+    duration_seconds: float
+    sandbox_mode: str
+    workspace_id: str
+    workspace_dir: str | None
+    repo_dir: str | None
+    repo_url: str | None
+    sandbox_name: str | None = None
+    sandbox_image: str | None = None
+    branch_name: str | None = None
+    base_branch: str | None = None
+    pr_url: str | None = None
+    review_required: bool = False
 
 
 @dataclass(slots=True)

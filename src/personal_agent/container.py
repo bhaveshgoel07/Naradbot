@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from personal_agent.agent.service import AgentOrchestratorService
+from personal_agent.automation.computer_use import ComputerUseService
 from personal_agent.automation.job_apply import JobApplicationService
 from personal_agent.automation.pi_agent import PiCodingAgentService
 from personal_agent.config.settings import Settings
 from personal_agent.discord.bot import PersonalAgentDiscordBot
 from personal_agent.discord.webhooks import DiscordWebhookSender
+from personal_agent.execution.blaxel import BlaxelSandboxService
 from personal_agent.graph.main import HNWorkflow
 from personal_agent.graph.nodes.hn import HNWorkflowNodes
 from personal_agent.hn.categorizer import StoryCategorizer
@@ -52,7 +55,10 @@ class ServiceContainer:
     hn_workflow: HNWorkflow
     hn_service: HNService
     scheduler_service: SchedulerService
+    blaxel_sandbox_service: BlaxelSandboxService
     pi_coding_agent_service: PiCodingAgentService
+    agent_orchestrator_service: AgentOrchestratorService
+    computer_use_service: ComputerUseService
     job_application_service: JobApplicationService
     discord_bot: PersonalAgentDiscordBot | None
 
@@ -149,7 +155,19 @@ def build_container(settings: Settings) -> ServiceContainer:
     hn_workflow = HNWorkflow(workflow_nodes)
     hn_service = HNService(hn_workflow)
     scheduler_service = SchedulerService(settings, hn_service)
-    pi_coding_agent_service = PiCodingAgentService(settings)
+    blaxel_sandbox_service = BlaxelSandboxService(settings)
+    pi_coding_agent_service = PiCodingAgentService(
+        settings,
+        sandbox_service=blaxel_sandbox_service,
+    )
+    agent_orchestrator_service = AgentOrchestratorService(
+        settings=settings,
+        pi_agent=pi_coding_agent_service,
+    )
+    computer_use_service = ComputerUseService(
+        settings=settings,
+        sandbox_service=blaxel_sandbox_service,
+    )
     job_application_service = JobApplicationService(
         settings=settings,
         pi_agent=pi_coding_agent_service,
@@ -167,7 +185,7 @@ def build_container(settings: Settings) -> ServiceContainer:
             settings=settings,
             hn_service=hn_service,
             run_repository=run_repository,
-            pi_coding_agent_service=pi_coding_agent_service,
+            agent_orchestrator_service=agent_orchestrator_service,
         )
         if webhook_sender is None:
             workflow_nodes.discord_sender = discord_bot.send_digest_message
@@ -189,7 +207,10 @@ def build_container(settings: Settings) -> ServiceContainer:
         hn_workflow=hn_workflow,
         hn_service=hn_service,
         scheduler_service=scheduler_service,
+        blaxel_sandbox_service=blaxel_sandbox_service,
         pi_coding_agent_service=pi_coding_agent_service,
+        agent_orchestrator_service=agent_orchestrator_service,
+        computer_use_service=computer_use_service,
         job_application_service=job_application_service,
         discord_bot=discord_bot,
     )

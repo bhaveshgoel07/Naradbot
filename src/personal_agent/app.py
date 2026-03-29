@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import asdict
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
+from personal_agent.agent.models import (
+    AgentMessageRequest,
+    AgentRepositoryPushRequest,
+    AgentRepositoryRequest,
+)
 from personal_agent.automation.models import (
     JobApplicationRequest,
-    PiRepositoryTaskRequest,
-    PiTaskRequest,
 )
 from personal_agent.config.settings import Settings, get_settings
 from personal_agent.container import ServiceContainer, build_container
@@ -31,6 +37,20 @@ class PiRunRequestBody(BaseModel):
     thinking: str | None = None
     append_system_prompt: str | None = None
     timeout_seconds: int | None = None
+    session_id: str | None = None
+
+
+class BlaxelInferenceRequestBody(BaseModel):
+    inputs: Any
+    workdir: str | None = None
+    files: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    provider: str | None = None
+    model: str | None = None
+    thinking: str | None = None
+    append_system_prompt: str | None = None
+    timeout_seconds: int | None = None
+    session_id: str | None = None
 
 
 class PiRepoRunRequestBody(BaseModel):
@@ -46,6 +66,14 @@ class PiRepoRunRequestBody(BaseModel):
     append_system_prompt: str | None = None
     timeout_seconds: int | None = None
     tools: list[str] = Field(default_factory=list)
+    allow_push: bool = False
+
+
+class PiRepoPushRequestBody(BaseModel):
+    workspace_id: str
+    pr_title: str | None = None
+    pr_body: str | None = None
+    base_branch: str | None = None
 
 
 class JobApplyRequestBody(BaseModel):
@@ -54,6 +82,26 @@ class JobApplyRequestBody(BaseModel):
     role_title: str | None = None
     notes: str | None = None
     submit: bool = False
+
+
+def _coerce_blaxel_inputs(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        parts = [
+            item if isinstance(item, str) else json.dumps(item, sort_keys=True)
+            for item in value
+        ]
+        return "\n".join(part for part in parts if part).strip()
+    if isinstance(value, dict):
+        for key in ("prompt", "input", "message", "text"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return json.dumps(value, sort_keys=True)
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -98,6 +146,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok", "environment": runtime_settings.environment}
 
+    @app.post("/")
+    async def run_blaxel_inference(body: BlaxelInferenceRequestBody) -> PlainTextResponse:
+        prompt = _coerce_blaxel_inputs(body.inputs)
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Request body must include non-empty inputs.")
+
+        result = await container.agent_orchestrator_service.handle_message(
+            AgentMessageRequest(
+                prompt=prompt,
+                transport="api",
+                workdir=body.workdir,
+                files=list(body.files),
+                tools=list(body.tools),
+                provider=body.provider,
+                model=body.model,
+                thinking=body.thinking,
+                append_system_prompt=body.append_system_prompt,
+                timeout_seconds=body.timeout_seconds,
+                session_id=body.session_id,
+            )
+        )
+        if not result.ok:
+            raise HTTPException(
+                status_code=500,
+                detail=result.error_text or "Agent task failed.",
+            )
+        return PlainTextResponse(result.final_text)
+
     @app.get("/status")
     async def status() -> dict[str, object]:
         recent_runs = container.run_repository.recent_runs(limit=5)
@@ -119,13 +195,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/agents/pi/status")
     async def pi_status() -> dict[str, object]:
-        return container.pi_coding_agent_service.status()
+        return container.agent_orchestrator_service.status()
 
     @app.post("/agents/pi/run")
     async def run_pi_task(body: PiRunRequestBody) -> dict[str, object]:
-        result = await container.pi_coding_agent_service.run_task(
-            PiTaskRequest(
+        result = await container.agent_orchestrator_service.handle_message(
+            AgentMessageRequest(
                 prompt=body.prompt,
+                transport="api",
                 workdir=body.workdir,
                 files=list(body.files),
                 tools=list(body.tools),
@@ -134,23 +211,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 thinking=body.thinking,
                 append_system_prompt=body.append_system_prompt,
                 timeout_seconds=body.timeout_seconds,
+                session_id=body.session_id,
             )
         )
-        return {
-            "available": result.available,
-            "command": result.command,
-            "exit_code": result.exit_code,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "duration_seconds": result.duration_seconds,
-        }
+        return asdict(result)
 
     @app.post("/agents/pi/repos/run")
     async def run_pi_repo_task(body: PiRepoRunRequestBody) -> dict[str, object]:
-        result = await container.pi_coding_agent_service.run_repository_task(
-            PiRepositoryTaskRequest(
+        result = await container.agent_orchestrator_service.prepare_repository(
+            AgentRepositoryRequest(
                 repo_url=body.repo_url,
                 prompt=body.prompt,
+                transport="api",
+                requested_by="fastapi",
                 base_branch=body.base_branch,
                 branch_name=body.branch_name,
                 pr_title=body.pr_title,
@@ -161,33 +234,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 append_system_prompt=body.append_system_prompt,
                 timeout_seconds=body.timeout_seconds,
                 tools=list(body.tools),
-                requested_by="fastapi",
+                allow_push=body.allow_push,
             )
         )
-        return {
-            "available": result.available,
-            "command": result.command,
-            "exit_code": result.exit_code,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "duration_seconds": result.duration_seconds,
-            "sandbox_mode": result.sandbox_mode,
-            "workspace_dir": result.workspace_dir,
-            "repo_dir": result.repo_dir,
-            "repo_url": result.repo_url,
-            "base_branch": result.base_branch,
-            "branch_name": result.branch_name,
-            "commit_sha": result.commit_sha,
-            "pr_url": result.pr_url,
-            "changes_detected": result.changes_detected,
-            "review_required": result.review_required,
-            "setup_commands": result.setup_commands,
-            "git_status": result.git_status,
-        }
+        return asdict(result)
+
+    @app.post("/agents/pi/repos/push")
+    async def push_pi_repo_task(body: PiRepoPushRequestBody) -> dict[str, object]:
+        result = await container.agent_orchestrator_service.approve_repository_push(
+            AgentRepositoryPushRequest(
+                workspace_id=body.workspace_id,
+                transport="api",
+                requested_by="fastapi",
+                pr_title=body.pr_title,
+                pr_body=body.pr_body,
+                base_branch=body.base_branch,
+            )
+        )
+        return asdict(result)
 
     @app.get("/automation/profile")
     async def automation_profile() -> dict[str, object]:
         return container.job_application_service.profile_status()
+
+    @app.get("/automation/computer-use/status")
+    async def computer_use_status() -> dict[str, object]:
+        return container.computer_use_service.status()
+
+    @app.post("/automation/computer-use/provision")
+    async def provision_computer_use_sandbox() -> dict[str, object]:
+        if not container.blaxel_sandbox_service.available:
+            raise HTTPException(
+                status_code=503,
+                detail="Computer-use sandboxing is disabled.",
+            )
+        return await container.computer_use_service.provision()
 
     @app.post("/automation/jobs/apply")
     async def apply_to_job(body: JobApplyRequestBody) -> dict[str, object]:
