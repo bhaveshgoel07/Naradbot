@@ -1,0 +1,11 @@
+type = "sandbox"
+name = "personal-agent-pi-workspace-template"
+description = "Reusable Pi workspace for repo edits and throwaway execution sandboxes."
+
+[runtime]
+generation = "mk3"
+memory = 4096
+
+[env]
+PERSONAL_AGENT_SANDBOX_ROLE = "pi-workspace"
+PERSONAL_AGENT_PI_COMMAND = "pi"

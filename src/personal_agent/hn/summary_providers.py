@@ -24,16 +24,32 @@ class StorySummaryResult:
 class StorySummaryProvider(Protocol):
     """Contract for generating shortlist summaries."""
 
-    async def summarize(self, ranked_story: RankedStory, channel_key: str) -> StorySummaryResult:
+    async def summarize(
+        self, ranked_story: RankedStory, channel_key: str
+    ) -> StorySummaryResult:
         raise NotImplementedError
 
 
 class HeuristicStorySummaryProvider:
     """Fast fallback summarizer that requires no external LLM call."""
 
-    async def summarize(self, ranked_story: RankedStory, channel_key: str) -> StorySummaryResult:
+    async def summarize(
+        self, ranked_story: RankedStory, channel_key: str
+    ) -> StorySummaryResult:
+        if (
+            ranked_story.generated_summary is not None
+            and ranked_story.generated_why_it_matters is not None
+        ):
+            return StorySummaryResult(
+                summary=ranked_story.generated_summary,
+                why_it_matters=ranked_story.generated_why_it_matters,
+            )
         story = ranked_story.story
-        summary = self._clean_text(story.text) if story.text else self._default_summary(ranked_story)
+        summary = (
+            self._clean_text(story.text)
+            if story.text
+            else self._default_summary(ranked_story)
+        )
         why_it_matters = self._why_it_matters(ranked_story, channel_key)
         return StorySummaryResult(summary=summary, why_it_matters=why_it_matters)
 
@@ -57,14 +73,27 @@ class HeuristicStorySummaryProvider:
     @staticmethod
     def _why_it_matters(ranked_story: RankedStory, channel_key: str) -> str:
         if channel_key == "opportunities":
-            tags = ", ".join(ranked_story.opportunity_reason_tags[:4]) or "explicit opportunity match"
+            tags = (
+                ", ".join(ranked_story.opportunity_reason_tags[:4])
+                or "explicit opportunity match"
+            )
             return f"Matched opportunity signals: {tags}."
         if channel_key == "interesting":
-            tags = ", ".join(ranked_story.interesting_reason_tags[:4]) or "overall:high-signal"
+            tags = (
+                ", ".join(ranked_story.interesting_reason_tags[:4])
+                or "overall:high-signal"
+            )
             return f"Matched worth-reading signals: {tags}."
-        tags = ", ".join(
-            (ranked_story.summary_reason_tags + ranked_story.interesting_reason_tags + ranked_story.opportunity_reason_tags)[:4]
-        ) or "overall:high-signal"
+        tags = (
+            ", ".join(
+                (
+                    ranked_story.summary_reason_tags
+                    + ranked_story.interesting_reason_tags
+                    + ranked_story.opportunity_reason_tags
+                )[:4]
+            )
+            or "overall:high-signal"
+        )
         return f"Selected as a notable overall story because of: {tags}."
 
 
@@ -79,11 +108,27 @@ class NebiusStorySummaryProvider:
     _client: AsyncOpenAI | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
-        self._client = AsyncOpenAI(base_url=self.base_url, api_key=self.api_key) if self.api_key else None
+        self._client = (
+            AsyncOpenAI(base_url=self.base_url, api_key=self.api_key)
+            if self.api_key
+            else None
+        )
 
-    async def summarize(self, ranked_story: RankedStory, channel_key: str) -> StorySummaryResult:
+    async def summarize(
+        self, ranked_story: RankedStory, channel_key: str
+    ) -> StorySummaryResult:
+        if (
+            ranked_story.generated_summary is not None
+            and ranked_story.generated_why_it_matters is not None
+        ):
+            return StorySummaryResult(
+                summary=ranked_story.generated_summary,
+                why_it_matters=ranked_story.generated_why_it_matters,
+            )
         if self._client is None:
-            logger.warning("Nebius API key missing; falling back to heuristic summaries")
+            logger.warning(
+                "Nebius API key missing; falling back to heuristic summaries"
+            )
             return await self.fallback_provider.summarize(ranked_story, channel_key)
 
         story = ranked_story.story
@@ -94,10 +139,7 @@ class NebiusStorySummaryProvider:
                 messages=[
                     {
                         "role": "system",
-                        "content": (
-                            "You summarize shortlisted Hacker News stories for Discord digests. "
-                            "Return strict JSON with keys summary and why_it_matters."
-                        ),
+                        "content": self._system_prompt_for(channel_key),
                     },
                     {
                         "role": "user",
@@ -109,23 +151,76 @@ class NebiusStorySummaryProvider:
                         ],
                     },
                 ],
-                temperature=0.3,
+                temperature=0.2,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Nebius summarization failed for story %s: %s", story.id, exc)
+            logger.warning(
+                "Nebius summarization failed for story %s: %s", story.id, exc
+            )
             return await self.fallback_provider.summarize(ranked_story, channel_key)
 
         content = response.choices[0].message.content or ""
         parsed = self._parse_response(content)
         if parsed is None:
-            logger.warning("Nebius returned non-JSON summary for story %s; using heuristic fallback", story.id)
+            logger.warning(
+                "Nebius returned non-JSON summary for story %s; using heuristic fallback",
+                story.id,
+            )
             return await self.fallback_provider.summarize(ranked_story, channel_key)
         return parsed
 
+    def _system_prompt_for(self, channel_key: str) -> str:
+        base_rules = (
+            "You produce concise Hacker News digest entries for Discord.\n"
+            "Output must be strict JSON with exactly two keys: summary, why_it_matters.\n"
+            "No markdown, no code fences, no extra keys, no preamble.\n"
+            "Keep language specific and factual. Avoid hype and generic phrases.\n"
+            "If data is missing, be transparent and concise."
+        )
+
+        if channel_key == "summary":
+            return (
+                f"{base_rules}\n"
+                "Channel objective: HN summary rollup.\n"
+                "- summary: one sentence (<= 220 chars) describing what the linked story is about.\n"
+                "- why_it_matters: one sentence (<= 180 chars) explaining broader relevance to engineers/builders.\n"
+                "Prefer technical impact, ecosystem shifts, or practical implications."
+            )
+        if channel_key == "interesting":
+            return (
+                f"{base_rules}\n"
+                "Channel objective: read-list / worth-reading selection.\n"
+                "- summary: one sentence (<= 220 chars) stating the core idea/result.\n"
+                "- why_it_matters: one sentence (<= 180 chars) focused on why a technical reader should spend time on it now.\n"
+                "Emphasize novelty, insight density, benchmark value, or implementation detail."
+            )
+        if channel_key == "opportunities":
+            return (
+                f"{base_rules}\n"
+                "Channel objective: opportunities (hiring, contract, freelance, internships, calls-for-collab).\n"
+                "- summary: one sentence (<= 220 chars) describing the opportunity and context.\n"
+                "- why_it_matters: one sentence (<= 180 chars) stating role fit, constraints, and urgency when available.\n"
+                "Prioritize role clarity, seniority hints, remote/on-site signals, and actionable relevance."
+            )
+
+        return (
+            f"{base_rules}\n"
+            "Channel objective: general technical digest.\n"
+            "- summary: one sentence (<= 220 chars).\n"
+            "- why_it_matters: one sentence (<= 180 chars)."
+        )
+
     def _build_prompt(self, ranked_story: RankedStory, channel_key: str) -> str:
         story = ranked_story.story
+        channel_hint = {
+            "summary": "Provide a crisp general-summary digest entry.",
+            "interesting": "Frame this for a curated read-list audience.",
+            "opportunities": "Frame this as a practical opportunity signal.",
+        }.get(channel_key, "Provide a concise technical digest entry.")
+
         return (
             f"Channel: {channel_key}\n"
+            f"Channel hint: {channel_hint}\n"
             f"Title: {story.title}\n"
             f"Author: {story.by}\n"
             f"Score: {story.score}\n"
@@ -133,11 +228,10 @@ class NebiusStorySummaryProvider:
             f"Domain: {story.domain}\n"
             f"URL: {story.url or story.permalink}\n"
             f"Reason tags: {', '.join(ranked_story.reason_tags[:8])}\n"
+            f"Interesting tags: {', '.join(ranked_story.interesting_reason_tags[:8]) or 'none'}\n"
+            f"Opportunity tags: {', '.join(ranked_story.opportunity_reason_tags[:8]) or 'none'}\n"
             f"Story text: {story.text or 'No self text provided.'}\n\n"
-            "Write a concise JSON object with:\n"
-            "- summary: one sentence under 220 characters\n"
-            "- why_it_matters: one sentence under 180 characters tailored to the channel\n"
-            "Do not include markdown fences or extra keys."
+            "Return JSON only."
         )
 
     @staticmethod

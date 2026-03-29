@@ -63,6 +63,12 @@ class RankedStory:
     interesting_score: float
     opportunity_score: float
     summary_score: float
+    generated_summary: str | None = None
+    generated_why_it_matters: str | None = None
+    analysis_source: str | None = None
+    verification_status: str | None = None
+    verification_notes: str | None = None
+    opportunity_verified: bool = False
     reason_tags: list[str] = field(default_factory=list)
     interesting_reason_tags: list[str] = field(default_factory=list)
     opportunity_reason_tags: list[str] = field(default_factory=list)
@@ -70,7 +76,9 @@ class RankedStory:
 
     @property
     def is_opportunity(self) -> bool:
-        return bool(self.opportunity_reason_tags)
+        return self.opportunity_verified or (
+            self.opportunity_score > 0 and bool(self.opportunity_reason_tags)
+        )
 
 
 @dataclass(slots=True)

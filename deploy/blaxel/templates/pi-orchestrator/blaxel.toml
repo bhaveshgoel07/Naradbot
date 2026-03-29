@@ -1,0 +1,11 @@
+type = "sandbox"
+name = "personal-agent-pi-orchestrator-template"
+description = "Persistent Pi orchestrator runtime for personal-agent."
+
+[runtime]
+generation = "mk3"
+memory = 4096
+
+[env]
+PERSONAL_AGENT_SANDBOX_ROLE = "pi-orchestrator"
+PERSONAL_AGENT_PI_COMMAND = "pi"

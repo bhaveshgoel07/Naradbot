@@ -35,22 +35,22 @@ def build_ranked_story() -> RankedStory:
 def test_build_summary_provider_returns_nebius_provider() -> None:
     settings = Settings(
         llm_provider="nebius",
-        llm_model="moonshotai/Kimi-K2.5-fast",
-        llm_base_url="https://api.tokenfactory.us-central1.nebius.com/v1/",
+        llm_model="NousResearch/Hermes-4-70B",
+        llm_base_url="https://api.tokenfactory.nebius.com/v1/",
         llm_api_key="test-key",
     )
 
     provider = build_summary_provider(settings)
 
     assert isinstance(provider, NebiusStorySummaryProvider)
-    assert provider.model == "moonshotai/Kimi-K2.5-fast"
+    assert provider.model == "NousResearch/Hermes-4-70B"
 
 
 @pytest.mark.asyncio
 async def test_nebius_provider_falls_back_without_api_key() -> None:
     provider = NebiusStorySummaryProvider(
-        model="moonshotai/Kimi-K2.5-fast",
-        base_url="https://api.tokenfactory.us-central1.nebius.com/v1/",
+        model="NousResearch/Hermes-4-70B",
+        base_url="https://api.tokenfactory.nebius.com/v1/",
         api_key=None,
         fallback_provider=HeuristicStorySummaryProvider(),
     )
@@ -59,3 +59,15 @@ async def test_nebius_provider_falls_back_without_api_key() -> None:
 
     assert "trending on Hacker News" in result.summary or "Launch post" in result.summary
     assert "worth-reading signals" in result.why_it_matters
+
+
+@pytest.mark.asyncio
+async def test_heuristic_provider_prefers_precomputed_story_analysis() -> None:
+    ranked_story = build_ranked_story()
+    ranked_story.generated_summary = "Precomputed summary"
+    ranked_story.generated_why_it_matters = "Precomputed rationale"
+
+    result = await HeuristicStorySummaryProvider().summarize(ranked_story, "summary")
+
+    assert result.summary == "Precomputed summary"
+    assert result.why_it_matters == "Precomputed rationale"

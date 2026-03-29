@@ -2,7 +2,7 @@ type = "job"
 name = "personal-agent-hn-digest"
 
 [entrypoint]
-prod = "python -m personal_agent.jobs.hn_digest"
+prod = "uv run personal-agent-hn-once"
 dev = "uv run personal-agent-hn-once"
 
 [env]
@@ -11,6 +11,10 @@ PERSONAL_AGENT_LOG_LEVEL = "INFO"
 PERSONAL_AGENT_HN_FETCH_LIMIT = "60"
 PERSONAL_AGENT_SUMMARY_TOPIC_COUNT = "5"
 PERSONAL_AGENT_INTERESTING_TOP_N = "12"
+PERSONAL_AGENT_OPPORTUNITY_EMBEDDING_ENABLED = "true"
+PERSONAL_AGENT_STORY_ANALYSIS_ENABLED = "true"
+PERSONAL_AGENT_LLM_PROVIDER = "nebius"
+PERSONAL_AGENT_LLM_MODEL = "NousResearch/Hermes-4-70B"
 
 [runtime]
 generation = "mk3"
